@@ -1,0 +1,18 @@
+# secrets - NEVER commit
+.env
+*.key
+*.pem
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# rust
+target/
+# node
+node_modules/
+dist/
+# os / editor
+.DS_Store
+.vscode/
+.idea/

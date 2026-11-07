@@ -1,0 +1,3 @@
+# add backend dependencies here, e.g. pytest, pyyaml
+pytest
+pyyaml

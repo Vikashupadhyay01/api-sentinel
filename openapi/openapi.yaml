@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: Mock Shop API (official contract)
+  version: "1.0"
+paths:
+  /api/v1/login:
+    post:
+      summary: Log in and get a token
+  /api/v1/users/me:
+    get:
+      summary: Current user profile
+  /api/v1/orders:
+    get:
+      summary: List my orders
+  /api/v1/orders/{order_id}:
+    get:
+      summary: Get one order
+# NOTE: /api/v1/admin/export and /api/v0/users are intentionally missing (shadow / zombie APIs).
