@@ -43,7 +43,7 @@ cd attack-sim && pip install -r requirements.txt && python3 bola_attack.py
 |---|---|---|---|
 | Team Lead | @your-username | `main` | Repo, merges, docs, review |
 | Member 2 | @username | `m2-sniffer` | eBPF + Rust sniffer |
-| Member 3 | @username | `m3-latency` | eBPF latency, enforcement |
+| Member 3 | @Chris301-droid| `m3-parser` | Parser, shadow API discovery |
 | Member 4 | @username | `m4-parser` | Parser, shadow API discovery |
 | Member 5 | @username | `m5-bola` | BOLA engine, rate limiting, mock API |
 
