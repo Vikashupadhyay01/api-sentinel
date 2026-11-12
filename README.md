@@ -230,3 +230,9 @@ python3 capture/benchmark.py
 * All components run strictly on `localhost` (plain HTTP).
 * No actual secrets or production credentials are present.
 
+---
+## Team
+| Member | GitHub | Branch | Area |
+|---|---|---|---|
+| Member 3 | @Chris301-droid | `m3-parser` | Parser, shadow API discovery |
+
