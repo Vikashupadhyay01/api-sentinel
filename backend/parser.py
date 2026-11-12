@@ -1,29 +1,23 @@
-"""Week 1 - M3 Parser (Arijeet Sharma / Chris301-droid) - MERGED v3
+"""Week 1 - M3 Parser (Arijeet Sharma / Chris301-droid) - v4 (13 Nov 2026)
 Rebuild HTTP request/response pairs from captured traffic.
 
-HOW THIS FILE WAS BUILT (10 Nov 2026, ~20:55 IST):
-  - Part 1 is main's backend/parser.py VERBATIM, as fetched live from
-    https://raw.githubusercontent.com/Vikashupadhyay01/api-sentinel/main/backend/parser.py
-    (commit ffdcd2e, 10 Nov 09:17 IST). Its Record, parse_line, iter_records
-    and load_records are UNCHANGED - do not edit them.
-  - Part 2 (added by M3) is the Week 1 raw-bytes parser: parse_request /
-    parse_response / pair_events, plus record_to_event() which converts
-    main's Record into the same ApiEvent the raw parser produces.
-  - This replaces parser-v2-merge-ready.py - DO NOT USE v2. Its Record
-    (timestamp, user_id, source_ip, headers, request_body, response_body)
-    does NOT match main's Record (ts, method, path, query, status, user,
-    req_body, resp_body, latency_ms, blocked). Pasting v2 would break
-    main's design. v3 keeps main's Record exactly.
+  - Part 1 is main's backend/parser.py VERBATIM (commit ffdcd2e).
+    Its Record, parse_line, iter_records and load_records are UNCHANGED.
+  - Part 2 (M3) is the raw-bytes parser: parse_request / parse_response /
+    pair_events, plus record_to_event() which converts main's Record into
+    the same ApiEvent the raw parser produces.
 
-PUSH STEPS (GitHub website, tonight before midnight, 10 Nov):
-  1. Open https://github.com/Vikashupadhyay01/api-sentinel, logged in as
-     Chris301-droid, branch m3-parser. Use "Update branch" / "Compare" to
-     pull main into m3-parser first, so this file lands on top of main.
-  2. Open backend/parser.py on m3-parser, delete its TODO-stub content,
-     paste this WHOLE file.
-  3. Commit message: Week 1: Implement parser to rebuild HTTP request/response pairs
-     Select "Commit directly to the m3-parser branch". Never commit to main.
-     Do not touch discovery.py.
+v4 changes (13 Nov 2026, M3 only, Part 2 only):
+  - HttpRequest.endpoint now maps UUID segments to {id} too, like
+    discovery.normalize_path on main, and strips a trailing slash,
+    so /api/v1/users/<uuid> and /api/v1/orders/101/ do not create
+    duplicate endpoints.
+  - parse_request / parse_response now raise a clear ValueError on a
+    malformed start line instead of crashing on unpack / int().
+  - record_to_event now preserves req_body / resp_body as bytes,
+    instead of dropping them (json_body is still dict-only).
+  - _try_json returns a dict or None, matching the Optional[dict]
+    annotation on json_body.
 """
 
 from __future__ import annotations
@@ -208,8 +202,15 @@ def load_records(path: str | Path) -> list[Record]:
 
 from dataclasses import field
 from datetime import timezone
-from typing import Dict, Union
+from typing import Dict
+import re
 from urllib.parse import parse_qs, urlparse
+
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -224,10 +225,18 @@ class HttpRequest:
 
     @property
     def endpoint(self) -> str:
-        """Normalized path for discovery, e.g. /api/v1/orders/101 -> /api/v1/orders/{id}"""
+        """Normalized path for discovery, e.g. /api/v1/orders/101 -> /api/v1/orders/{id}
+
+        Numeric IDs and UUIDs both become {id} (same idea as
+        discovery.normalize_path on main), and a trailing slash
+        does not create a second endpoint.
+        """
+        path = self.path
+        if len(path) > 1:
+            path = path.rstrip("/")
         parts = []
-        for seg in self.path.split("/"):
-            if seg.isdigit():
+        for seg in path.split("/"):
+            if seg.isdigit() or _UUID_RE.match(seg):
                 parts.append("{id}")
             else:
                 parts.append(seg)
@@ -260,10 +269,20 @@ def _parse_headers(lines):
 
 
 def _try_json(body: bytes):
+    """Parse *body* as JSON; return the dict, or None.
+
+    Only dict bodies are returned, matching the Optional[dict]
+    annotation on json_body. A JSON list / number / string body
+    is not a dict, so it returns None (the raw bytes are kept
+    in HttpRequest.body / HttpResponse.body).
+    """
+    if not body:
+        return None
     try:
-        return json.loads(body.decode("utf-8")) if body else None
+        parsed = json.loads(body.decode("utf-8"))
     except Exception:
         return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def parse_request(raw: bytes) -> HttpRequest:
@@ -274,7 +293,10 @@ def parse_request(raw: bytes) -> HttpRequest:
     lines = head.decode("utf-8", errors="ignore").splitlines()
     if not lines:
         raise ValueError("empty request")
-    method, full_path, _ = lines[0].split(" ", 2)
+    parts = lines[0].split(" ", 2)
+    if len(parts) != 3:
+        raise ValueError(f"malformed request line: {lines[0]!r}")
+    method, full_path, _ = parts
     parsed = urlparse(full_path)
     headers = _parse_headers(lines[1:])
     user_id = headers.get("x-user-id")
@@ -299,7 +321,12 @@ def parse_response(raw: bytes) -> HttpResponse:
     if not lines:
         raise ValueError("empty response")
     parts = lines[0].split(" ", 2)
-    status = int(parts[1]) if len(parts) > 1 else 0
+    if len(parts) < 2:
+        raise ValueError(f"malformed status line: {lines[0]!r}")
+    try:
+        status = int(parts[1])
+    except ValueError:
+        raise ValueError(f"malformed status line: {lines[0]!r}")
     return HttpResponse(
         status=status,
         headers=_parse_headers(lines[1:]),
@@ -335,11 +362,13 @@ def record_to_event(record: Record) -> ApiEvent:
             method=record.method,
             path=record.path,
             query=parse_qs(record.query),
+            body=record.req_body.encode("utf-8"),
             json_body=req_json if isinstance(req_json, dict) else None,
             user_id=record.user,
         ),
         response=HttpResponse(
             status=record.status,
+            body=record.resp_body.encode("utf-8"),
             json_body=resp_json if isinstance(resp_json, dict) else None,
         ),
         source_ip="127.0.0.1",
@@ -383,4 +412,28 @@ if __name__ == "__main__":
         assert len(load_records(tmp)) == 1
     finally:
         os.unlink(tmp)
-    print("parser v3 self-test OK (main JSONL + raw-bytes + bridge)")
+    # Self-test 4: v4 endpoint - UUID + trailing slash (Part 2 only)
+    assert HttpRequest(method="GET", path="/api/v1/users/550e8400-e29b-41d4-a716-446655440000").endpoint == "/api/v1/users/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/orders/101/").endpoint == "/api/v1/orders/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/users/me").endpoint == "/api/v1/users/me"
+    print("ENDPOINT v4: UUID -> {id}, trailing slash stripped, /users/me unchanged")
+
+    # Self-test 5: v4 bridge preserves bodies, malformed start lines fail cleanly
+    assert ev.request.body == b""
+    assert ev.response.body == b'{"order_id": 101, "user_id": "alice"}'
+    assert ev.response.json_body == {"order_id": 101, "user_id": "alice"}
+    try:
+        parse_request(b"BADLINE\r\nHost: x\r\n\r\n")
+        raise AssertionError("malformed request line should raise ValueError")
+    except ValueError as e:
+        assert "malformed request line" in str(e)
+    try:
+        parse_response(b"HTTP/1.1 NOTASTATUS\r\n\r\n")
+        raise AssertionError("malformed status line should raise ValueError")
+    except ValueError as e:
+        assert "malformed status line" in str(e)
+    assert _try_json(b"[1, 2, 3]") is None  # list body is not a dict
+    assert _try_json(b'{"a": 1}') == {"a": 1}
+    print("BRIDGE v4: bodies preserved, malformed lines raise clear ValueError, _try_json dict-only")
+
+    print("parser v4 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint)")
