@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>API-Sentinel | Live Security Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z'/></svg>" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #090d16;
+      --bg-surface: #0f172a;
+      --bg-card: #141e33;
+      --border: #24324f;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.25);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.15);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.15);
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.15);
+      --purple: #a855f7;
+      --purple-bg: rgba(168, 85, 247, 0.15);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg-primary); color: var(--text-main); font-family: 'Plus Jakarta Sans', sans-serif; padding: 1.5rem 2rem; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; }
+    .stat-card {
+      background: linear-gradient(135deg, rgba(20, 30, 51, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      position: relative;
+    }
+    .badge { padding: 0.2rem 0.5rem; border-radius: 9999px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+    .badge-documented { background: var(--success-bg); color: var(--success); }
+    .badge-shadow { background: var(--purple-bg); color: var(--purple); }
+    .badge-zombie { background: var(--danger-bg); color: var(--danger); }
+    .badge-high { background: var(--danger-bg); color: var(--danger); }
+    .badge-medium { background: var(--warning-bg); color: var(--warning); }
+    .badge-low { background: rgba(6, 182, 212, 0.15); color: #06b6d4; }
+    
+    .drawer-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); z-index: 1000; }
+    .drawer-panel {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 560px; max-width: 90vw;
+      background: #0d1527; border-left: 1px solid var(--border);
+      box-shadow: -10px 0 30px rgba(0,0,0,0.8); z-index: 1001;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .drawer-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: rgba(15, 23, 42, 0.6); }
+    .drawer-body { padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem; }
+    .drawer-section { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; }
+    .drawer-section-title { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.5rem; }
+    .code-block { background: #060911; border: 1px solid #1a263e; border-radius: 6px; padding: 0.75rem; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #38bdf8; white-space: pre-wrap; word-break: break-all; }
+
+    /* Toast Notifications */
+    .toast-container { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 2000; display: flex; flex-direction: column; gap: 0.75rem; pointer-events: none; }
+    .toast { pointer-events: auto; min-width: 320px; max-width: 400px; background: #0f172a; border: 1px solid var(--border); border-left: 4px solid var(--danger); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.7); padding: 0.8rem 1rem; color: #fff; font-size: 0.8rem; }
+    .toast.toast-warning { border-left-color: var(--warning); }
+    .toast.toast-success { border-left-color: var(--success); }
+
+    /* Mode Button */
+    .mode-btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.42rem 0.85rem; border-radius: 8px; font-size: 0.78rem; font-weight: 700; cursor: pointer; border: 1px solid transparent; user-select: none; }
+    .mode-btn.passive { background: rgba(6, 182, 212, 0.15); color: #38bdf8; border-color: rgba(6, 182, 212, 0.3); }
+    .mode-btn.enforce { background: rgba(239, 68, 68, 0.2); color: #f87171; border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 10px rgba(239, 68, 68, 0.25); }
+  </style>
+</head>
+<body>
+  <div id="toast-container" class="toast-container"></div>
+  <div style="max-width: 1440px; margin: 0 auto;">
+    <!-- Top Header -->
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+      <div style="display: flex; align-items: center; gap: 1rem;">
+        <div style="background: linear-gradient(135deg, #4f46e5, #06b6d4); width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+          🛡️
+        </div>
+        <div>
+          <h1 style="font-size: 1.4rem; font-weight: 800;">API-SENTINEL <span style="font-size: 0.7rem; background: var(--border); padding: 2px 6px; border-radius: 4px; color: var(--text-muted);">v1.1 LAB</span></h1>
+          <p style="font-size: 0.82rem; color: var(--text-muted);">Runtime BOLA & Shadow API Detection Engine</p>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;">
+        <!-- Runtime Mode Toggle Button -->
+        <button id="mode-toggle-btn" class="mode-btn passive" onclick="toggleMode()" title="Click to toggle between Passive Auditing and Active Enforcement">
+          <span id="mode-icon">👁️</span>
+          <span id="mode-text">MODE: PASSIVE (AUDIT)</span>
+          <span style="font-size: 0.65rem; border: 1px solid currentColor; border-radius: 3px; padding: 1px 3px;">TOGGLE</span>
+        </button>
+
+        <!-- Demo Attack Dropdown -->
+        <div style="position: relative; display: inline-block;">
+          <button onclick="document.getElementById('preview-attack-menu').style.display = document.getElementById('preview-attack-menu').style.display === 'none' ? 'flex' : 'none'" style="display: flex; align-items: center; gap: 0.4rem; background: var(--bg-surface); border: 1px solid var(--border); color: #fff; padding: 0.42rem 0.8rem; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+            <span>⚡</span> Demo Attacks ▾
+          </button>
+          <div id="preview-attack-menu" style="display: none; position: absolute; right: 0; top: 115%; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 50; min-width: 220px; flex-direction: column;">
+            <button onclick="triggerAttack('bola')" style="background: none; border: none; border-bottom: 1px solid var(--border); padding: 0.6rem 0.9rem; color: var(--danger); font-size: 0.78rem; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 0.4rem;">
+              <span>🎯</span> BOLA Cross-User Attack
+            </button>
+            <button onclick="triggerAttack('enumeration')" style="background: none; border: none; border-bottom: 1px solid var(--border); padding: 0.6rem 0.9rem; color: var(--purple); font-size: 0.78rem; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 0.4rem;">
+              <span>🤖</span> Rapid ID Enumeration Scan
+            </button>
+            <button onclick="triggerAttack('shadow')" style="background: none; border: none; border-bottom: 1px solid var(--border); padding: 0.6rem 0.9rem; color: #06b6d4; font-size: 0.78rem; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 0.4rem;">
+              <span>👻</span> Shadow & Zombie Calls
+            </button>
+            <button onclick="triggerAttack('normal')" style="background: none; border: none; border-bottom: 1px solid var(--border); padding: 0.6rem 0.9rem; color: var(--success); font-size: 0.78rem; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 0.4rem;">
+              <span>✅</span> Benign Normal Traffic
+            </button>
+            <button onclick="triggerAttack('all')" style="background: none; border: none; padding: 0.6rem 0.9rem; color: #fff; font-size: 0.78rem; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 0.4rem; font-weight: 700;">
+              <span>💥</span> Run Full Attack Suite
+            </button>
+          </div>
+        </div>
+
+        <!-- Reset Button -->
+        <button onclick="triggerReset()" style="display: flex; align-items: center; gap: 0.35rem; background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-muted); padding: 0.42rem 0.75rem; border-radius: 8px; font-size: 0.8rem; cursor: pointer;">
+          <span>🔄</span> Reset
+        </button>
+
+        <a href="http://localhost:9000/api/report.pdf" target="_blank" style="display: flex; align-items: center; gap: 0.4rem; background: linear-gradient(135deg, #4f46e5, #06b6d4); color: #fff; text-decoration: none; padding: 0.42rem 0.85rem; border-radius: 8px; font-size: 0.8rem; font-weight: 700; box-shadow: 0 0 14px var(--accent-glow);">
+          <span>📄</span> Export PDF
+        </a>
+
+        <div style="position: relative; display: inline-block;">
+          <button onclick="document.getElementById('preview-export-menu').style.display = document.getElementById('preview-export-menu').style.display === 'none' ? 'flex' : 'none'" style="display: flex; align-items: center; gap: 0.4rem; background: var(--bg-surface); border: 1px solid var(--border); color: #fff; padding: 0.42rem 0.8rem; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+            <span>💾</span> Export ▾
+          </button>
+          <div id="preview-export-menu" style="display: none; position: absolute; right: 0; top: 115%; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 50; min-width: 200px; flex-direction: column;">
+            <a href="http://localhost:9000/api/export/alerts.csv" download style="padding: 0.6rem 0.9rem; color: #fff; font-size: 0.78rem; text-decoration: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.4rem;">
+              <span>🚨</span> Alerts (CSV)
+            </a>
+            <a href="http://localhost:9000/api/export/alerts.json" download style="padding: 0.6rem 0.9rem; color: #fff; font-size: 0.78rem; text-decoration: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.4rem;">
+              <span>📋</span> Alerts (JSON)
+            </a>
+            <a href="http://localhost:9000/api/export/blocked.csv" download style="padding: 0.6rem 0.9rem; color: #fff; font-size: 0.78rem; text-decoration: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.4rem;">
+              <span>🛡️</span> Blocked Requests (CSV)
+            </a>
+            <a href="http://localhost:9000/api/export/openapi.yaml" download style="padding: 0.6rem 0.9rem; color: #fff; font-size: 0.78rem; text-decoration: none; display: flex; align-items: center; gap: 0.4rem;">
+              <span>🗺️</span> Discovered OpenAPI (YAML)
+            </a>
+          </div>
+        </div>
+
+        <div id="status-pill" style="display: flex; align-items: center; gap: 0.5rem; background: var(--bg-surface); padding: 0.4rem 0.8rem; border-radius: 8px; border: 1px solid var(--border); font-size: 0.8rem;">
+          <span id="status-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #94a3b8;"></span>
+          <span id="status-text" style="font-weight: 600;">CONNECTING TO :9000...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Stat Cards -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+      <div class="stat-card">
+        <div style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">TOTAL REQUESTS</div>
+        <div id="stat-requests" style="font-size: 2.2rem; font-weight: 800; margin-top: 0.5rem;">0</div>
+        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Captured by :8080 proxy</div>
+      </div>
+      <div class="stat-card">
+        <div style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">ENDPOINTS INVENTORY</div>
+        <div id="stat-endpoints" style="font-size: 2.2rem; font-weight: 800; margin-top: 0.5rem;">0</div>
+        <div id="stat-endpoints-sub" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">0 Doc • 0 Shadow • 0 Zombie</div>
+      </div>
+      <div class="stat-card">
+        <div style="font-size: 0.82rem; color: var(--danger); font-weight: 600;">SECURITY ALERTS</div>
+        <div id="stat-alerts" style="font-size: 2.2rem; font-weight: 800; margin-top: 0.5rem; color: var(--danger);">0</div>
+        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">OWASP Violations</div>
+      </div>
+      <div class="stat-card">
+        <div style="font-size: 0.82rem; color: var(--warning); font-weight: 600;">BLOCKED REQUESTS</div>
+        <div id="stat-blocked" style="font-size: 2.2rem; font-weight: 800; margin-top: 0.5rem; color: var(--warning);">0</div>
+        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Enforcement Active (403)</div>
+      </div>
+    </div>
+
+    <!-- Row 1: Risk Gauge + OWASP Distribution -->
+    <div style="display: grid; grid-template-columns: minmax(300px, 1fr) 2fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+      <div class="card" style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+        <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <h2 style="font-size: 1rem; font-weight: 700;">🎯 Risk Score</h2>
+          <span id="risk-badge" class="badge">LOW RISK</span>
+        </div>
+        <div style="position: relative; width: 220px; height: 125px; margin: 0.5rem auto 0;">
+          <svg width="220" height="125" viewBox="0 0 220 125">
+            <path d="M 35 110 A 75 75 0 0 1 185 110" fill="none" stroke="#1e293b" stroke-width="16" stroke-linecap="round"/>
+            <path id="gauge-arc" d="M 35 110 A 75 75 0 0 1 185 110" fill="none" stroke="#10b981" stroke-width="16" stroke-linecap="round" stroke-dasharray="235.6" stroke-dashoffset="235.6" style="transition: stroke-dashoffset 0.8s ease;"/>
+          </svg>
+          <div style="position: absolute; bottom: 0; left: 0; right: 0; display: flex; flex-direction: column; align-items: center;">
+            <span id="risk-score-text" style="font-size: 2.4rem; font-weight: 800; color: #10b981;">0</span>
+            <span style="font-size: 0.75rem; color: var(--text-dim); margin-top: -4px;">out of 100</span>
+          </div>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 1rem;">
+          Automated Threat Posture Gauge
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size: 1rem; margin-bottom: 1rem;">🛡️ OWASP API Security Distribution</h2>
+        <div id="owasp-bars" style="display: flex; flex-direction: column; gap: 0.75rem;"></div>
+      </div>
+    </div>
+
+    <!-- Row 2: Timeline Activity Chart -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+        <div>
+          <h2 style="font-size: 1rem; font-weight: 700;">📈 Traffic & Threat Activity Timeline (15 Minutes)</h2>
+          <span style="font-size: 0.75rem; color: var(--text-dim);">10-second activity buckets</span>
+        </div>
+        <div id="timeline-tooltip" class="mono" style="font-size: 0.75rem; color: var(--text-muted);">
+          Hover over bars for bucket metrics
+        </div>
+      </div>
+      <div id="timeline-chart" style="height: 70px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--border); padding-bottom: 2px;"></div>
+    </div>
+
+    <!-- Row 3: Top Users & Endpoints & Blocked & Alerts -->
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+      <div>
+        <!-- Top Users Table -->
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <h2 style="font-size: 1rem; margin-bottom: 1rem;">👤 Top Users by Threat Score</h2>
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border); color: var(--text-muted); text-align: left;">
+                <th style="padding: 0.5rem;">USER</th>
+                <th style="padding: 0.5rem; text-align: center;">ALERTS</th>
+                <th style="padding: 0.5rem; text-align: center;">BLOCKED</th>
+                <th style="padding: 0.5rem;">TOP THREAT</th>
+              </tr>
+            </thead>
+            <tbody id="top-users-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Endpoints Table with Filter -->
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h2 style="font-size: 1rem;">🗺️ Endpoint Inventory</h2>
+            <input type="text" id="endpoint-search" placeholder="Filter paths..." style="background: var(--bg-primary); border: 1px solid var(--border); color: #fff; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.75rem;" />
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border); color: var(--text-muted); text-align: left;">
+                <th style="padding: 0.5rem;">METHOD</th>
+                <th style="padding: 0.5rem;">PATH</th>
+                <th style="padding: 0.5rem;">CLASS</th>
+                <th style="padding: 0.5rem;">OWASP</th>
+                <th style="padding: 0.5rem; text-align: right;">HITS</th>
+              </tr>
+            </thead>
+            <tbody id="endpoints-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Blocked Requests Log -->
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h2 style="font-size: 1rem;">🛡️ Blocked Requests Log (<span id="blocked-count-text">0</span>)</h2>
+            <span class="badge badge-high">ENFORCEMENT ACTIVE</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border); color: var(--text-muted); text-align: left;">
+                <th style="padding: 0.5rem;">TIME</th>
+                <th style="padding: 0.5rem;">USER</th>
+                <th style="padding: 0.5rem;">METHOD</th>
+                <th style="padding: 0.5rem;">PATH</th>
+                <th style="padding: 0.5rem;">OBJECT</th>
+                <th style="padding: 0.5rem;">REASON</th>
+                <th style="padding: 0.5rem;">OWASP</th>
+              </tr>
+            </thead>
+            <tbody id="blocked-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Live Alerts Feed -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h2 style="font-size: 1rem;">⚡ Live Alerts Feed</h2>
+          <span style="font-size: 0.7rem; color: var(--danger); font-weight: 700;">CLICK TO INSPECT</span>
+        </div>
+        <div id="alerts-body" style="display: flex; flex-direction: column; gap: 0.75rem; max-height: 800px; overflow-y: auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawer Modal Container -->
+  <div id="drawer-container" style="display: none;"></div>
+
+  <script>
+    let globalAlerts = [];
+    let globalEndpoints = [];
+    let globalBlocked = [];
+    let currentMode = 'passive';
+    const knownAlertIds = new Set();
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+          <div style="font-weight: 600; line-height: 1.3;">${message}</div>
+          <button onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 1rem; line-height: 1;">✕</button>
+        </div>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+      }, 4500);
+    }
+
+    function updateModeUI(mode) {
+      currentMode = mode;
+      const btn = document.getElementById('mode-toggle-btn');
+      const icon = document.getElementById('mode-icon');
+      const text = document.getElementById('mode-text');
+      if (!btn || !icon || !text) return;
+      if (mode === 'enforce') {
+        btn.className = 'mode-btn enforce';
+        icon.textContent = '🛡️';
+        text.textContent = 'MODE: ENFORCEMENT (403 BLOCK)';
+      } else {
+        btn.className = 'mode-btn passive';
+        icon.textContent = '👁️';
+        text.textContent = 'MODE: PASSIVE (AUDIT)';
+      }
+    }
+
+    async function toggleMode() {
+      const nextMode = currentMode === 'enforce' ? 'passive' : 'enforce';
+      try {
+        const res = await fetch('http://localhost:9000/api/mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: nextMode })
+        }).then(r => r.json());
+        if (res.mode) {
+          updateModeUI(res.mode);
+          showToast(`API-Sentinel switched to ${res.mode === 'enforce' ? 'ENFORCEMENT (403 BLOCKING)' : 'PASSIVE AUDIT'} mode`, res.mode === 'enforce' ? 'warning' : 'success');
+        }
+      } catch (e) {
+        showToast('Failed to toggle detection mode', 'danger');
+      }
+    }
+
+    async function triggerAttack(type) {
+      const menu = document.getElementById('preview-attack-menu');
+      if (menu) menu.style.display = 'none';
+      try {
+        showToast(`Launching ${type.toUpperCase()} traffic against 127.0.0.1:8080…`, 'warning');
+        const res = await fetch('http://localhost:9000/api/demo/attack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type })
+        }).then(r => r.json());
+        if (res.status === 'completed') {
+          showToast(`Simulation completed (${res.probes_sent} probes sent)`, 'success');
+          update();
+        } else if (res.error) {
+          showToast(`Simulation error: ${res.error}`, 'danger');
+        }
+      } catch (e) {
+        showToast('Attack simulation request failed', 'danger');
+      }
+    }
+
+    async function triggerReset() {
+      if (!window.confirm('Reset all detection state, inventory, and event logs?')) return;
+      try {
+        const res = await fetch('http://localhost:9000/api/demo/reset', { method: 'POST' }).then(r => r.json());
+        if (res.status === 'ok') {
+          knownAlertIds.clear();
+          showToast('State and event log reset cleanly.', 'success');
+          update();
+        }
+      } catch (e) {
+        showToast('Failed to reset state', 'danger');
+      }
+    }
+
+    window.addEventListener('click', (e) => {
+      if (!e.target.closest('#preview-attack-menu') && !e.target.closest('button[onclick*="preview-attack-menu"]')) {
+        const m = document.getElementById('preview-attack-menu');
+        if (m) m.style.display = 'none';
+      }
+      if (!e.target.closest('#preview-export-menu') && !e.target.closest('button[onclick*="preview-export-menu"]')) {
+        const m = document.getElementById('preview-export-menu');
+        if (m) m.style.display = 'none';
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeDrawer();
+    });
+
+    function openDrawer(alertId) {
+      const a = globalAlerts.find(x => x.id === alertId);
+      if (!a) return;
+
+      const container = document.getElementById('drawer-container');
+      container.style.display = 'block';
+      container.innerHTML = `
+        <div class="drawer-backdrop" onclick="closeDrawer()"></div>
+        <div class="drawer-panel">
+          <div class="drawer-header">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span class="badge ${a.severity === 'HIGH' ? 'badge-high' : 'badge-medium'}">${a.severity}</span>
+              <strong style="color: #fff;">${a.type} Finding</strong>
+              <span class="badge" style="background: rgba(99,102,241,0.2); color: #818cf8;">${a.owasp_category}</span>
+            </div>
+            <button onclick="closeDrawer()" style="background: none; border: none; color: #fff; font-size: 1.2rem; cursor: pointer;">✕</button>
+          </div>
+          <div class="drawer-body">
+            <div class="drawer-section">
+              <div class="drawer-section-title">📌 Alert Overview</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.8rem;">
+                <div>Actor: <strong>${a.user || 'anonymous'}</strong></div>
+                <div>Object ID: <strong class="mono" style="color: #f87171;">${a.object_id || 'None'}</strong></div>
+                <div class="mono" style="grid-column: span 2; color: #818cf8;">${a.endpoint}</div>
+              </div>
+            </div>
+
+            <div class="drawer-section">
+              <div class="drawer-section-title">⚠️ Threat Explanation</div>
+              <p style="font-size: 0.84rem; line-height: 1.4;">${a.explanation}</p>
+            </div>
+
+            <div class="drawer-section">
+              <div class="drawer-section-title">🛡️ OWASP Category</div>
+              <div style="font-size: 0.82rem; color: var(--warning); font-weight: 700;">${a.owasp_category}</div>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">${a.owasp_description || 'OWASP API Security Violation'}</p>
+            </div>
+
+            <div class="drawer-section">
+              <div class="drawer-section-title">🔍 Request / Response (PII-Masked)</div>
+              <div class="code-block">${a.method || 'GET'} ${a.raw_path || a.endpoint} HTTP/1.1\nHost: localhost:8080\nAuthorization: Bearer token-***\n\nHTTP/1.1 ${a.status || 200} OK\n${a.resp_body || ''}</div>
+            </div>
+
+            <div class="drawer-section" style="border-left: 3px solid var(--success); background: rgba(16,185,129,0.05);">
+              <div class="drawer-section-title" style="color: var(--success);">💡 Remediation Guidance</div>
+              <p style="font-size: 0.82rem; line-height: 1.4;">${a.remediation || 'Enforce strict object-level authorization checks at the service layer.'}</p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function closeDrawer() {
+      document.getElementById('drawer-container').style.display = 'none';
+    }
+
+    async function update() {
+      try {
+        const [stats, endpoints, alerts, blocked, timeline] = await Promise.all([
+          fetch('http://localhost:9000/api/stats').then(r => r.json()),
+          fetch('http://localhost:9000/api/endpoints').then(r => r.json()),
+          fetch('http://localhost:9000/api/alerts').then(r => r.json()),
+          fetch('http://localhost:9000/api/blocked').then(r => r.json()).catch(() => []),
+          fetch('http://localhost:9000/api/timeline').then(r => r.json()).catch(() => ({ buckets: [] }))
+        ]);
+
+        globalAlerts = alerts;
+        globalEndpoints = endpoints;
+        globalBlocked = blocked;
+
+        if (stats.mode) {
+          updateModeUI(stats.mode);
+        }
+
+        if (knownAlertIds.size > 0 && alerts.length > 0) {
+          const newAlerts = alerts.filter(a => !knownAlertIds.has(a.id));
+          if (newAlerts.length > 0) {
+            const highThreat = newAlerts.find(a => a.severity === 'HIGH' || a.severity === 'CRITICAL');
+            if (highThreat) {
+              showToast(`🚨 ${highThreat.type} Alert: ${highThreat.explanation.slice(0, 60)}…`, 'danger');
+            }
+          }
+        }
+        alerts.forEach(a => knownAlertIds.add(a.id));
+
+        document.getElementById('status-dot').style.background = '#10b981';
+        document.getElementById('status-text').textContent = 'DETECTION ENGINE ACTIVE • ' + new Date().toLocaleTimeString();
+
+        document.getElementById('stat-requests').textContent = stats.total_requests;
+        document.getElementById('stat-endpoints').textContent = stats.total_endpoints;
+        document.getElementById('stat-endpoints-sub').textContent = `${stats.documented_endpoints} Doc • ${stats.shadow_endpoints} Shadow • ${stats.zombie_endpoints} Zombie`;
+        document.getElementById('stat-alerts').textContent = stats.total_alerts;
+        document.getElementById('stat-blocked').textContent = stats.blocked_requests;
+        document.getElementById('blocked-count-text').textContent = blocked.length;
+
+        // Risk Gauge
+        const score = stats.risk_score || 0;
+        const color = stats.risk_color || '#10b981';
+        const level = stats.risk_level || 'LOW';
+        document.getElementById('risk-score-text').textContent = score;
+        document.getElementById('risk-score-text').style.color = color;
+        const arc = document.getElementById('gauge-arc');
+        arc.setAttribute('stroke', color);
+        const offset = 235.6 - (235.6 * score) / 100;
+        arc.setAttribute('stroke-dashoffset', offset);
+        const badge = document.getElementById('risk-badge');
+        badge.textContent = level + ' RISK';
+        badge.style.background = color + '22';
+        badge.style.color = color;
+
+        // OWASP Bars
+        const owaspDiv = document.getElementById('owasp-bars');
+        const cats = [
+          { code: 'API1', name: 'BOLA', color: 'var(--danger)' },
+          { code: 'API4', name: 'Rate Limiting', color: 'var(--warning)' },
+          { code: 'API6', name: 'ID Enumeration / Bot', color: 'var(--purple)' },
+          { code: 'API9', name: 'Improper Inventory (Shadow/Zombie)', color: '#06b6d4' }
+        ];
+        const maxAlerts = Math.max(1, ...Object.values(stats.owasp_breakdown || {}));
+        owaspDiv.innerHTML = cats.map(c => {
+          const count = stats.owasp_breakdown[c.code] || 0;
+          const pct = Math.round((count / maxAlerts) * 100);
+          return `
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 4px;">
+                <span><strong>${c.code}:</strong> ${c.name}</span>
+                <span class="mono"><strong>${count}</strong> alerts</span>
+              </div>
+              <div style="height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden;">
+                <div style="height: 100%; width: ${pct}%; background: ${c.color}; border-radius: 4px;"></div>
+              </div>
+            </div>`;
+        }).join('');
+
+        // Timeline
+        const tChart = document.getElementById('timeline-chart');
+        const buckets = timeline.buckets || [];
+        const maxB = Math.max(1, ...buckets.map(b => (b.requests || 0) + (b.alerts || 0) + (b.blocked || 0)));
+        tChart.innerHTML = buckets.map(b => {
+          const reqH = Math.min(65, Math.round((b.requests / maxB) * 60));
+          const altH = Math.min(65, Math.round((b.alerts / maxB) * 60));
+          const blkH = Math.min(65, Math.round((b.blocked / maxB) * 60));
+          const totH = Math.max(reqH > 0 || altH > 0 || blkH > 0 ? 4 : 2, reqH + altH + blkH);
+          const col = altH > 0 ? 'var(--danger)' : blkH > 0 ? 'var(--warning)' : reqH > 0 ? '#6366f1' : '#1e293b';
+          return `
+            <div style="flex: 1; height: 100%; display: flex; align-items: flex-end;"
+                 onmouseenter="document.getElementById('timeline-tooltip').innerHTML = '⏱️ ${b.label}: ${b.requests} reqs • ${b.alerts} alerts • ${b.blocked} blocked'"
+                 onmouseleave="document.getElementById('timeline-tooltip').innerHTML = 'Hover over bars for bucket metrics'">
+              <div style="width: 100%; height: ${totH}px; background: ${col}; border-radius: 2px 2px 0 0;"></div>
+            </div>
+          `;
+        }).join('');
+
+        // Top users
+        const topBody = document.getElementById('top-users-body');
+        const topUsers = stats.top_users || [];
+        if (topUsers.length === 0) {
+          topBody.innerHTML = '<tr><td colspan="4" style="padding: 1rem; text-align: center; color: var(--text-dim);">No user threat metrics recorded.</td></tr>';
+        } else {
+          topBody.innerHTML = topUsers.map(u => `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+              <td style="padding: 0.5rem;"><strong>${u.user}</strong></td>
+              <td style="padding: 0.5rem; text-align: center;"><span class="badge badge-high">${u.alert_count}</span></td>
+              <td style="padding: 0.5rem; text-align: center;">${u.blocked_count}</td>
+              <td style="padding: 0.5rem; color: var(--warning);">${u.top_threat}</td>
+            </tr>
+          `).join('');
+        }
+
+        // Endpoints
+        const searchVal = (document.getElementById('endpoint-search')?.value || '').toLowerCase();
+        const epBody = document.getElementById('endpoints-body');
+        epBody.innerHTML = endpoints.filter(e => !searchVal || e.norm_path.toLowerCase().includes(searchVal)).map(ep => `
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+            <td style="padding: 0.5rem;"><span class="mono"><strong>${ep.method}</strong></span></td>
+            <td style="padding: 0.5rem;" class="mono">${ep.norm_path}</td>
+            <td style="padding: 0.5rem;"><span class="badge badge-${ep.classification.toLowerCase()}">${ep.classification}</span></td>
+            <td style="padding: 0.5rem; color: var(--warning);">${ep.owasp_category || '—'}</td>
+            <td style="padding: 0.5rem; text-align: right;" class="mono">${ep.hit_count}</td>
+          </tr>
+        `).join('');
+
+        // Blocked requests
+        const blockedBody = document.getElementById('blocked-body');
+        if (blocked.length === 0) {
+          blockedBody.innerHTML = '<tr><td colspan="7" style="padding: 1rem; text-align: center; color: var(--text-dim);">No requests blocked yet.</td></tr>';
+        } else {
+          blockedBody.innerHTML = blocked.map(b => `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+              <td style="padding: 0.5rem;" class="mono">${b.time ? new Date(b.time).toLocaleTimeString() : b.ts}</td>
+              <td style="padding: 0.5rem;">${b.user || 'anonymous'}</td>
+              <td style="padding: 0.5rem;"><span class="mono">${b.method}</span></td>
+              <td style="padding: 0.5rem;" class="mono">${b.path}</td>
+              <td style="padding: 0.5rem;" class="mono">${b.object_id || '—'}</td>
+              <td style="padding: 0.5rem; color: #f87171;">${b.reason}</td>
+              <td style="padding: 0.5rem;"><span class="badge badge-high">${b.owasp_category || 'API1'}</span></td>
+            </tr>
+          `).join('');
+        }
+
+        // Alerts (Clickable to open drawer)
+        const alertBody = document.getElementById('alerts-body');
+        alertBody.innerHTML = alerts.map(a => `
+          <div onclick="openDrawer('${a.id}')" style="background: var(--bg-primary); border-left: 3px solid ${a.severity === 'HIGH' ? 'var(--danger)' : 'var(--warning)'}; padding: 0.75rem; border-radius: 0 6px 6px 0; font-size: 0.8rem; cursor: pointer;">
+            <div style="display: flex; justify-content: space-between;">
+              <span class="badge badge-${a.severity.toLowerCase()}">${a.type}</span>
+              <span style="color: var(--text-dim); font-size: 0.7rem;">${a.owasp_category}</span>
+            </div>
+            <div style="margin-top: 0.4rem; color: var(--text-main);">${a.explanation}</div>
+            <div style="margin-top: 0.3rem; color: var(--text-muted); font-size: 0.72rem; display: flex; justify-content: space-between;" class="mono">
+              <span>user: ${a.user || 'None'}</span>
+              <span style="color: var(--accent);">Inspect ↗</span>
+            </div>
+          </div>
+        `).join('');
+
+      } catch (err) {
+        document.getElementById('status-dot').style.background = '#ef4444';
+        document.getElementById('status-text').textContent = 'ENGINE OFFLINE (Check :9000)';
+      }
+    }
+
+    document.getElementById('endpoint-search')?.addEventListener('input', update);
+    setInterval(update, 2000);
+    update();
+  </script>
+</body>
+</html>

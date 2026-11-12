@@ -2,17 +2,27 @@
 .env
 *.key
 *.pem
+
+# runtime data & logs
+data/
+*.jsonl
+
 # python
 __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
+
 # rust
 target/
+
 # node
 node_modules/
 dist/
+
 # os / editor
 .DS_Store
 .vscode/
 .idea/
+
