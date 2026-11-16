@@ -1,23 +1,16 @@
-"""Week 1 - M3 Parser (Arijeet Sharma / Chris301-droid) - v4 (13 Nov 2026)
-Rebuild HTTP request/response pairs from captured traffic.
+"""
+backend/parser.py – JSONL event log reader.
 
-  - Part 1 is main's backend/parser.py VERBATIM (commit ffdcd2e).
-    Its Record, parse_line, iter_records and load_records are UNCHANGED.
-  - Part 2 (M3) is the raw-bytes parser: parse_request / parse_response /
-    pair_events, plus record_to_event() which converts main's Record into
-    the same ApiEvent the raw parser produces.
+Reads the event log written by capture/proxy.py and yields typed Record
+dataclass instances.  Malformed lines are silently skipped so a corrupt
+line never crashes the pipeline.
 
-v4 changes (13 Nov 2026, M3 only, Part 2 only):
-  - HttpRequest.endpoint now maps UUID segments to {id} too, like
-    discovery.normalize_path on main, and strips a trailing slash,
-    so /api/v1/users/<uuid> and /api/v1/orders/101/ do not create
-    duplicate endpoints.
-  - parse_request / parse_response now raise a clear ValueError on a
-    malformed start line instead of crashing on unpack / int().
-  - record_to_event now preserves req_body / resp_body as bytes,
-    instead of dropping them (json_body is still dict-only).
-  - _try_json returns a dict or None, matching the Optional[dict]
-    annotation on json_body.
+Usage
+-----
+  from backend.parser import Record, iter_records
+
+  for record in iter_records("data/events.jsonl"):
+      print(record.user, record.path, record.status)
 """
 
 from __future__ import annotations
@@ -31,7 +24,7 @@ from typing import Generator, Optional
 
 
 # ---------------------------------------------------------------------------
-# PART 1 - main's JSONL event log reader (VERBATIM, do not edit)
+# Record dataclass
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -167,7 +160,25 @@ def iter_records(
     *,
     warn_on_malformed: bool = False,
 ) -> Generator[Record, None, None]:
-    """Yield :class:`Record` objects from a JSONL event log file."""
+    """Yield :class:`Record` objects from a JSONL event log file.
+
+    Parameters
+    ----------
+    path:
+        Path to the JSONL event log (e.g. ``"data/events.jsonl"``).
+    warn_on_malformed:
+        When ``True``, print a warning to *stderr* for each bad line.
+
+    Yields
+    ------
+    Record
+        One record per valid JSONL line.
+
+    Notes
+    -----
+    The file is opened with ``errors="replace"`` so binary garbage never
+    raises ``UnicodeDecodeError``.  Non-existent files yield nothing.
+    """
 
     path = Path(path)
 
@@ -198,6 +209,10 @@ def load_records(path: str | Path) -> list[Record]:
 # PART 2 - M3 Week 1 raw-bytes parser (ADDED, main's code above untouched)
 # Parses raw HTTP request/response bytes (eBPF sniffer / mitmproxy fallback)
 # into the same ApiEvent shape, so Week 2 discovery.py can use either input.
+#
+# v5 (14 Nov 2026): rebased onto main c47fbe6 (Vikash's 13 Nov cleanup of
+# main's parser.py). Part 1 above is main's current JSONL reader; Part 2
+# is unchanged from v4 (UUID + trailing-slash endpoint, bodies preserved).
 # ---------------------------------------------------------------------------
 
 from dataclasses import field
@@ -436,4 +451,4 @@ if __name__ == "__main__":
     assert _try_json(b'{"a": 1}') == {"a": 1}
     print("BRIDGE v4: bodies preserved, malformed lines raise clear ValueError, _try_json dict-only")
 
-    print("parser v4 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint)")
+    print("parser v5 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint)")
