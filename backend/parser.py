@@ -213,6 +213,8 @@ def load_records(path: str | Path) -> list[Record]:
 # v5 (14 Nov 2026): rebased onto main c47fbe6 (Vikash's 13 Nov cleanup of
 # main's parser.py). Part 1 above is main's current JSONL reader; Part 2
 # is unchanged from v4 (UUID + trailing-slash endpoint, bodies preserved).
+# v6 (17 Nov 2026): LF-only (\n\n) requests/responses now split correctly
+# in parse_request + parse_response; Part 1 (main JSONL reader) untouched.
 # ---------------------------------------------------------------------------
 
 from dataclasses import field
@@ -302,8 +304,9 @@ def _try_json(body: bytes):
 
 def parse_request(raw: bytes) -> HttpRequest:
     """Parse raw HTTP request bytes into HttpRequest."""
-    head, _, body = raw.partition(b"\r\n\r\n")
-    if not head:
+    if b"\r\n\r\n" in raw:
+        head, _, body = raw.partition(b"\r\n\r\n")
+    else:
         head, _, body = raw.partition(b"\n\n")
     lines = head.decode("utf-8", errors="ignore").splitlines()
     if not lines:
@@ -331,7 +334,10 @@ def parse_request(raw: bytes) -> HttpRequest:
 
 def parse_response(raw: bytes) -> HttpResponse:
     """Parse raw HTTP response bytes into HttpResponse."""
-    head, _, body = raw.partition(b"\r\n\r\n")
+    if b"\r\n\r\n" in raw:
+        head, _, body = raw.partition(b"\r\n\r\n")
+    else:
+        head, _, body = raw.partition(b"\n\n")
     lines = head.decode("utf-8", errors="ignore").splitlines()
     if not lines:
         raise ValueError("empty response")
@@ -451,4 +457,12 @@ if __name__ == "__main__":
     assert _try_json(b'{"a": 1}') == {"a": 1}
     print("BRIDGE v4: bodies preserved, malformed lines raise clear ValueError, _try_json dict-only")
 
-    print("parser v5 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint)")
+    # Self-test 6: v6 LF-only separators (no CRLF at all)
+    ev6 = pair_events(b"GET /api/v1/orders/7 HTTP/1.1\nHost: x\nX-User-Id: u9\n\n",
+                       b"HTTP/1.1 201 Created\nContent-Type: application/json\n\n{\"order_id\": 7}")
+    assert ev6.request.endpoint == "/api/v1/orders/{id}"
+    assert ev6.response.status == 201 and ev6.request.user_id == "u9"
+    assert ev6.response.json_body == {"order_id": 7}
+    print("LF-ONLY v6: \\n\\n request/response split correctly")
+
+    print("parser v6 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint + LF-only)")
