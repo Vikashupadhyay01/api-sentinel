@@ -215,6 +215,9 @@ def load_records(path: str | Path) -> list[Record]:
 # is unchanged from v4 (UUID + trailing-slash endpoint, bodies preserved).
 # v6 (17 Nov 2026): LF-only (\n\n) requests/responses now split correctly
 # in parse_request + parse_response; Part 1 (main JSONL reader) untouched.
+# v7 (19 Nov 2026): endpoint fast path - a UUID is exactly 36 chars, so
+# the regex only runs when len(seg) == 36; identical results, less work.
+# Part 1 (main JSONL reader) untouched.
 # ---------------------------------------------------------------------------
 
 from dataclasses import field
@@ -253,7 +256,9 @@ class HttpRequest:
             path = path.rstrip("/")
         parts = []
         for seg in path.split("/"):
-            if seg.isdigit() or _UUID_RE.match(seg):
+            # Fast path: a UUID is exactly 36 chars, so the regex only
+            # runs on 36-char segments. Same result, less work per event.
+            if seg.isdigit() or (len(seg) == 36 and _UUID_RE.match(seg)):
                 parts.append("{id}")
             else:
                 parts.append(seg)
@@ -465,4 +470,16 @@ if __name__ == "__main__":
     assert ev6.response.json_body == {"order_id": 7}
     print("LF-ONLY v6: \\n\\n request/response split correctly")
 
-    print("parser v6 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint + LF-only)")
+    # Self-test 7: v7 endpoint fast path - same results, less work
+    assert HttpRequest(method="GET", path="/api/v1/users/550e8400-e29b-41d4-a716-446655440000").endpoint == "/api/v1/users/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/orders/101").endpoint == "/api/v1/orders/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/users/me").endpoint == "/api/v1/users/me"
+    import time
+    _paths = [f"/api/v1/orders/{i}" for i in range(20000)]
+    _t0 = time.perf_counter()
+    for _p in _paths:
+        HttpRequest(method="GET", path=_p).endpoint
+    _t1 = time.perf_counter()
+    print(f"ENDPOINT v7: 20000 normalisations in {(_t1 - _t0) * 1000:.1f} ms (UUID length fast path)")
+
+    print("parser v7 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint + LF-only + v7 fast path)")
