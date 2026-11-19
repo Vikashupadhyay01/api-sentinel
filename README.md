@@ -91,10 +91,19 @@ api-sentinel/
 ├── capture/                    # Traffic capture layer
 │   ├── proxy.py                # Reverse proxy on :8080 (dynamic mode polling & ENFORCE=1)
 │   └── benchmark.py            # Latency overhead measurement (< 5 ms goal)
-├── dashboard/                  # Frontend UI
-│   ├── src/                    # React 18 + Vite dashboard (drawer, filters, gauge, timeline)
+├── dashboard/                  # Frontend UI (React 18 + Vite)
+│   ├── src/
+│   │   ├── components/         # Sidebar, Header, Toasts, GlobalSearch
+│   │   ├── contexts/           # AppContext (central state, polling, actions)
+│   │   ├── hooks/              # useLocalStorage, usePolling, useAlertStatus, useGlobalSearch
+│   │   ├── lib/                # api.js client, format.js helpers
+│   │   ├── pages/              # Overview, Endpoints, Alerts, Blocked, Users, Reports, Setup
+│   │   ├── App.jsx             # Shell & router layout
+│   │   ├── index.css           # Excel-style Coverage design system (Light/Dark themes)
+│   │   └── main.jsx            # Entry point
+│   ├── .env.example            # VITE_API_BASE=http://localhost:9000/api
 │   ├── package.json            # npm package dependencies
-│   └── preview.html            # Zero-dependency browser preview with interactive controls
+│   └── preview.html            # Standalone zero-dependency browser preview
 ├── data/                       # Runtime event log (events.jsonl)
 ├── docs/                       # Architecture & design documentation
 │   └── ARCHITECTURE.md         # Detailed technical specification
@@ -206,6 +215,21 @@ python3 attack-sim/enumeration_attack.py
     - Live switching between `PASSIVE` and `ENFORCE` via `/api/mode` without restarting services.
     - Safe in-dashboard attack simulations (`/api/demo/attack`) restricted strictly to `127.0.0.1:8080`.
     - Live toast notifications and unread alert badge counter.
+
+---
+
+## 🎨 v1.2 Redesign Highlights (Security Validation Coverage Dashboard)
+
+The dashboard has been refactored into a modular, responsive architecture styled after an Excel-inspired **Security Validation Coverage Dashboard**:
+- **Design Frame & Palette**: Cyan frame (`#0fb2d9`) framing an inner light card (`#f1f5f6`), accented by Teal (`#1cc8ae`), Cyan (`#0eb3d8`), and Orange (`#f5a623`).
+- **Sidebar Navigation**: Dedicated collapsible navigation (Home, Endpoints, Alerts, Blocked, Users, Reports, Setup) with real-time unread badges.
+- **Pure SVG Responsive Data Visualizations**: Dependency-free, zero-latency visualizations including OWASP category bars, dual-series traffic timelines, coverage & effectiveness donuts, combo blocked/alert charts, user threat stacked bars, and gradient area fills with hover tooltips and click-to-filter.
+- **Workflow State Management**: Alerts can be marked as `New`, `Acknowledged`, `Resolved`, or `False Positive` with localStorage persistence.
+- **User Threat Profiles Page**: Comprehensive user threat scoring, sparklines, and click-through filtering.
+- **Global Search (Ctrl+K / `/`)**: Fast modal search across endpoints, alerts, users, and object IDs.
+- **Light & Dark Themes**: Full CSS variables supporting both the reference light theme and the dark security theme.
+- **Configurable Polling**: Live/pause controls with 1s, 2s, 5s, 10s intervals.
+- **Endpoint Detail Drawer**: Includes an instant "Copy as cURL" button for quick verification.
 
 ---
 
