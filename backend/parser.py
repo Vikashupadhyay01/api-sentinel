@@ -12,6 +12,7 @@ Usage
   for record in iter_records("data/events.jsonl"):
       print(record.user, record.path, record.status)
 """
+
 from __future__ import annotations
 
 import json
@@ -75,8 +76,10 @@ class Record:
     @property
     def datetime(self) -> Optional[datetime]:
         """Parse ``ts`` into a timezone-aware :class:`datetime`, or ``None``."""
+
         try:
             return datetime.fromisoformat(self.ts)
+
         except (ValueError, TypeError):
             return None
 
@@ -85,6 +88,7 @@ class Record:
         """Attempt to parse ``resp_body`` as JSON; ``None`` on failure."""
         try:
             return json.loads(self.resp_body)
+
         except (json.JSONDecodeError, TypeError):
             return None
 
@@ -93,6 +97,7 @@ class Record:
         """Attempt to parse ``req_body`` as JSON; ``None`` on failure."""
         try:
             return json.loads(self.req_body)
+
         except (json.JSONDecodeError, TypeError):
             return None
 
@@ -100,6 +105,7 @@ class Record:
 # ---------------------------------------------------------------------------
 # Fields required in every valid event line
 # ---------------------------------------------------------------------------
+
 _REQUIRED_FIELDS: frozenset[str] = frozenset(
     {"ts", "method", "path", "query", "status", "user",
      "req_body", "resp_body", "latency_ms"}
@@ -112,12 +118,15 @@ def parse_line(line: str) -> Optional[Record]:
     Returns ``None`` for blank lines, JSON errors, missing fields, or
     type-coercion failures — all callers should treat ``None`` as "skip".
     """
+
     line = line.strip()
+
     if not line:
         return None
 
     try:
         data: dict = json.loads(line)
+
     except json.JSONDecodeError:
         return None
 
@@ -139,7 +148,9 @@ def parse_line(line: str) -> Optional[Record]:
             resp_body=str(data.get("resp_body", "")),
             latency_ms=float(data["latency_ms"]),
             blocked=bool(data.get("blocked", False)),
+
         )
+
     except (ValueError, TypeError, KeyError):
         return None
 
@@ -168,13 +179,16 @@ def iter_records(
     The file is opened with ``errors="replace"`` so binary garbage never
     raises ``UnicodeDecodeError``.  Non-existent files yield nothing.
     """
+
     path = Path(path)
+
     if not path.exists():
         return
 
     with path.open("r", encoding="utf-8", errors="replace") as fh:
         for lineno, raw_line in enumerate(fh, start=1):
             record = parse_line(raw_line)
+
             if record is None:
                 if warn_on_malformed and raw_line.strip():
                     print(
@@ -182,6 +196,7 @@ def iter_records(
                         file=sys.stderr,
                     )
                 continue
+
             yield record
 
 
@@ -189,3 +204,282 @@ def load_records(path: str | Path) -> list[Record]:
     """Load all valid records from *path* into a list (convenience wrapper)."""
     return list(iter_records(path))
 
+
+# ---------------------------------------------------------------------------
+# PART 2 - M3 Week 1 raw-bytes parser (ADDED, main's code above untouched)
+# Parses raw HTTP request/response bytes (eBPF sniffer / mitmproxy fallback)
+# into the same ApiEvent shape, so Week 2 discovery.py can use either input.
+#
+# v5 (14 Nov 2026): rebased onto main c47fbe6 (Vikash's 13 Nov cleanup of
+# main's parser.py). Part 1 above is main's current JSONL reader; Part 2
+# is unchanged from v4 (UUID + trailing-slash endpoint, bodies preserved).
+# v6 (17 Nov 2026): LF-only (\n\n) requests/responses now split correctly
+# in parse_request + parse_response; Part 1 (main JSONL reader) untouched.
+# v7 (19 Nov 2026): endpoint fast path - a UUID is exactly 36 chars, so
+# the regex only runs when len(seg) == 36; identical results, less work.
+# Part 1 (main JSONL reader) untouched.
+# ---------------------------------------------------------------------------
+
+from dataclasses import field
+from datetime import timezone
+from typing import Dict
+import re
+from urllib.parse import parse_qs, urlparse
+
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class HttpRequest:
+    method: str
+    path: str
+    query: Dict[str, list] = field(default_factory=dict)
+    headers: Dict[str, str] = field(default_factory=dict)
+    body: bytes = b""
+    json_body: Optional[dict] = None
+    user_id: Optional[str] = None
+
+    @property
+    def endpoint(self) -> str:
+        """Normalized path for discovery, e.g. /api/v1/orders/101 -> /api/v1/orders/{id}
+
+        Numeric IDs and UUIDs both become {id} (same idea as
+        discovery.normalize_path on main), and a trailing slash
+        does not create a second endpoint.
+        """
+        path = self.path
+        if len(path) > 1:
+            path = path.rstrip("/")
+        parts = []
+        for seg in path.split("/"):
+            # Fast path: a UUID is exactly 36 chars, so the regex only
+            # runs on 36-char segments. Same result, less work per event.
+            if seg.isdigit() or (len(seg) == 36 and _UUID_RE.match(seg)):
+                parts.append("{id}")
+            else:
+                parts.append(seg)
+        return "/".join(parts)
+
+
+@dataclass
+class HttpResponse:
+    status: int
+    headers: Dict[str, str] = field(default_factory=dict)
+    body: bytes = b""
+    json_body: Optional[dict] = None
+
+
+@dataclass
+class ApiEvent:
+    timestamp: str
+    request: HttpRequest
+    response: Optional[HttpResponse] = None
+    source_ip: str = "127.0.0.1"
+
+
+def _parse_headers(lines):
+    headers = {}
+    for line in lines:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            headers[k.strip().lower()] = v.strip()
+    return headers
+
+
+def _try_json(body: bytes):
+    """Parse *body* as JSON; return the dict, or None.
+
+    Only dict bodies are returned, matching the Optional[dict]
+    annotation on json_body. A JSON list / number / string body
+    is not a dict, so it returns None (the raw bytes are kept
+    in HttpRequest.body / HttpResponse.body).
+    """
+    if not body:
+        return None
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def parse_request(raw: bytes) -> HttpRequest:
+    """Parse raw HTTP request bytes into HttpRequest."""
+    if b"\r\n\r\n" in raw:
+        head, _, body = raw.partition(b"\r\n\r\n")
+    else:
+        head, _, body = raw.partition(b"\n\n")
+    lines = head.decode("utf-8", errors="ignore").splitlines()
+    if not lines:
+        raise ValueError("empty request")
+    parts = lines[0].split(" ", 2)
+    if len(parts) != 3:
+        raise ValueError(f"malformed request line: {lines[0]!r}")
+    method, full_path, _ = parts
+    parsed = urlparse(full_path)
+    headers = _parse_headers(lines[1:])
+    user_id = headers.get("x-user-id")
+    auth = headers.get("authorization", "")
+    if not user_id and auth.startswith("Bearer "):
+        user_id = auth.replace("Bearer ", "").strip() or None
+    return HttpRequest(
+        method=method.upper(),
+        path=parsed.path,
+        query=parse_qs(parsed.query),
+        headers=headers,
+        body=body,
+        json_body=_try_json(body),
+        user_id=user_id,
+    )
+
+
+def parse_response(raw: bytes) -> HttpResponse:
+    """Parse raw HTTP response bytes into HttpResponse."""
+    if b"\r\n\r\n" in raw:
+        head, _, body = raw.partition(b"\r\n\r\n")
+    else:
+        head, _, body = raw.partition(b"\n\n")
+    lines = head.decode("utf-8", errors="ignore").splitlines()
+    if not lines:
+        raise ValueError("empty response")
+    parts = lines[0].split(" ", 2)
+    if len(parts) < 2:
+        raise ValueError(f"malformed status line: {lines[0]!r}")
+    try:
+        status = int(parts[1])
+    except ValueError:
+        raise ValueError(f"malformed status line: {lines[0]!r}")
+    return HttpResponse(
+        status=status,
+        headers=_parse_headers(lines[1:]),
+        body=body,
+        json_body=_try_json(body),
+    )
+
+
+def pair_events(req_raw: bytes, resp_raw: bytes, source_ip="127.0.0.1") -> ApiEvent:
+    """Combine one request + response into a single ApiEvent for discovery/BOLA."""
+    return ApiEvent(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        request=parse_request(req_raw),
+        response=parse_response(resp_raw),
+        source_ip=source_ip,
+    )
+
+
+def record_to_event(record: Record) -> ApiEvent:
+    """Convert main's JSONL Record into the ApiEvent the raw parser produces.
+
+    Field mapping (main's schema -> ApiEvent):
+      ts -> timestamp | user -> user_id | query (raw string) -> parse_qs
+      req_body (string) -> json_body via Record.req_json
+      resp_body (string) -> json_body via Record.resp_json
+    Main's schema has no source_ip, so it defaults to 127.0.0.1.
+    """
+    req_json = record.req_json
+    resp_json = record.resp_json
+    return ApiEvent(
+        timestamp=record.ts,
+        request=HttpRequest(
+            method=record.method,
+            path=record.path,
+            query=parse_qs(record.query),
+            body=record.req_body.encode("utf-8"),
+            json_body=req_json if isinstance(req_json, dict) else None,
+            user_id=record.user,
+        ),
+        response=HttpResponse(
+            status=record.status,
+            body=record.resp_body.encode("utf-8"),
+            json_body=resp_json if isinstance(resp_json, dict) else None,
+        ),
+        source_ip="127.0.0.1",
+    )
+
+
+if __name__ == "__main__":
+    # Self-test 1: main's JSONL path, using main's exact schema
+    line = json.dumps({
+        "ts": "2026-11-10T10:00:00+00:00",
+        "method": "GET", "path": "/api/v1/orders/101", "query": "",
+        "status": 200, "user": "alice",
+        "req_body": "", "resp_body": '{"order_id": 101, "user_id": "alice"}',
+        "latency_ms": 12.5, "blocked": False,
+    })
+    rec = parse_line(line)
+    assert rec is not None and rec.user == "alice" and rec.status == 200
+    assert rec.resp_json == {"order_id": 101, "user_id": "alice"}
+    assert parse_line('{"bad": 1}') is None  # missing required fields -> skip
+    ev = record_to_event(rec)
+    assert ev.request.endpoint == "/api/v1/orders/{id}"
+    assert ev.request.user_id == "alice" and ev.response.status == 200
+    print(f"JSONL: {ev.request.method} {ev.request.path} -> {ev.request.endpoint} -> {ev.response.status} user={ev.request.user_id}")
+
+    # Self-test 2: raw-bytes path (Week 1 original)
+    raw_req = b"GET /api/v1/orders/101 HTTP/1.1\r\nHost: localhost:8000\r\nX-User-Id: user-1\r\n\r\n"
+    raw_resp = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"order_id\": 101, \"user_id\": \"user-1\"}"
+    ev2 = pair_events(raw_req, raw_resp)
+    assert ev2.request.endpoint == "/api/v1/orders/{id}"
+    assert ev2.response.status == 200 and ev2.request.user_id == "user-1"
+    print(f"RAW: {ev2.request.method} {ev2.request.path} -> {ev2.request.endpoint} -> {ev2.response.status} user={ev2.request.user_id}")
+
+    # Self-test 3: iter_records over a temp JSONL file
+    import tempfile, os
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+        fh.write(line + "\n")
+        fh.write('{"bad": 1}\n')
+        fh.write("\n")
+        tmp = fh.name
+    try:
+        assert len(load_records(tmp)) == 1
+    finally:
+        os.unlink(tmp)
+    # Self-test 4: v4 endpoint - UUID + trailing slash (Part 2 only)
+    assert HttpRequest(method="GET", path="/api/v1/users/550e8400-e29b-41d4-a716-446655440000").endpoint == "/api/v1/users/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/orders/101/").endpoint == "/api/v1/orders/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/users/me").endpoint == "/api/v1/users/me"
+    print("ENDPOINT v4: UUID -> {id}, trailing slash stripped, /users/me unchanged")
+
+    # Self-test 5: v4 bridge preserves bodies, malformed start lines fail cleanly
+    assert ev.request.body == b""
+    assert ev.response.body == b'{"order_id": 101, "user_id": "alice"}'
+    assert ev.response.json_body == {"order_id": 101, "user_id": "alice"}
+    try:
+        parse_request(b"BADLINE\r\nHost: x\r\n\r\n")
+        raise AssertionError("malformed request line should raise ValueError")
+    except ValueError as e:
+        assert "malformed request line" in str(e)
+    try:
+        parse_response(b"HTTP/1.1 NOTASTATUS\r\n\r\n")
+        raise AssertionError("malformed status line should raise ValueError")
+    except ValueError as e:
+        assert "malformed status line" in str(e)
+    assert _try_json(b"[1, 2, 3]") is None  # list body is not a dict
+    assert _try_json(b'{"a": 1}') == {"a": 1}
+    print("BRIDGE v4: bodies preserved, malformed lines raise clear ValueError, _try_json dict-only")
+
+    # Self-test 6: v6 LF-only separators (no CRLF at all)
+    ev6 = pair_events(b"GET /api/v1/orders/7 HTTP/1.1\nHost: x\nX-User-Id: u9\n\n",
+                       b"HTTP/1.1 201 Created\nContent-Type: application/json\n\n{\"order_id\": 7}")
+    assert ev6.request.endpoint == "/api/v1/orders/{id}"
+    assert ev6.response.status == 201 and ev6.request.user_id == "u9"
+    assert ev6.response.json_body == {"order_id": 7}
+    print("LF-ONLY v6: \\n\\n request/response split correctly")
+
+    # Self-test 7: v7 endpoint fast path - same results, less work
+    assert HttpRequest(method="GET", path="/api/v1/users/550e8400-e29b-41d4-a716-446655440000").endpoint == "/api/v1/users/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/orders/101").endpoint == "/api/v1/orders/{id}"
+    assert HttpRequest(method="GET", path="/api/v1/users/me").endpoint == "/api/v1/users/me"
+    import time
+    _paths = [f"/api/v1/orders/{i}" for i in range(20000)]
+    _t0 = time.perf_counter()
+    for _p in _paths:
+        HttpRequest(method="GET", path=_p).endpoint
+    _t1 = time.perf_counter()
+    print(f"ENDPOINT v7: 20000 normalisations in {(_t1 - _t0) * 1000:.1f} ms (UUID length fast path)")
+
+    print("parser v7 self-test OK (main JSONL + raw-bytes + bridge + v4 endpoint + LF-only + v7 fast path)")
