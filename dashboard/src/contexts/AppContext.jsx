@@ -15,7 +15,7 @@ const DEFAULT_STATS = {
 };
 
 export function AppProvider({ children }) {
-  const [theme, setTheme] = useLocalStorage('sentinel-theme', 'light');
+  const [theme, setTheme] = useLocalStorage('sentinel-theme-v2', 'light');
   const [refreshInterval, setRefreshInterval] = useLocalStorage('sentinel-interval', 2000);
   const [livePolling, setLivePolling] = useLocalStorage('sentinel-live', true);
   const [dateRange, setDateRange] = useLocalStorage('sentinel-range', '15m');

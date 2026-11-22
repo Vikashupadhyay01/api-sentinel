@@ -25,4 +25,8 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+*_nobody
+*_nobody/
+dist_old/
+screenshot_overview_1440.png
 
