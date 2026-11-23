@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { fmt } from '../lib/format';
+import { api } from '../lib/api';
 
 const TEAL = '#1cc8ae';
 const ORANGE = '#f5a623';
@@ -628,7 +629,7 @@ function BlockedAreaCard({ buckets }) {
 // Main OverviewPage component (5 clean, full-width rows matching reference)
 // ---------------------------------------------------------------------------
 export function OverviewPage() {
-  const { stats, alerts, timelineBuckets, topUsers, setActiveTab, connected } = useApp();
+  const { stats, alerts, timelineBuckets, topUsers, setActiveTab, connected, offlineHint, apiBase } = useApp();
   const [activeOwasp, setActiveOwasp] = useState(null);
 
   const handleOwaspClick = (code) => {
@@ -636,13 +637,30 @@ export function OverviewPage() {
     setActiveTab('alerts');
   };
 
+  const targetApi = apiBase || api.base;
+  const isNonLocal = typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1';
+  const hintText = offlineHint || (isNonLocal ? 'blocked by CORS: open http://localhost:5173' : 'backend not running');
+
+  const renderOfflineBanner = () => (
+    <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderLeft: '3px solid var(--warning)', background: 'var(--warning-bg)', padding: '10px 16px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ color: 'var(--warning)', fontWeight: 700, fontSize: '0.85rem' }}>⚠️ Detection engine offline</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+          Calling <code style={{ fontFamily: 'monospace', background: 'var(--card-bg)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border)' }}>{targetApi}</code>
+        </span>
+      </div>
+      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+        Hint: <strong style={{ color: 'var(--warning)' }}>{hintText}</strong>
+      </div>
+    </div>
+  );
+
   if (!connected && stats.total_requests === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 8, borderLeft: '3px solid var(--warning)', background: 'var(--warning-bg)' }}>
-          <span style={{ color: 'var(--warning)', fontWeight: 700, fontSize: '0.85rem' }}>⚠️ Detection engine offline</span>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>Start the backend at port 9000 to see live telemetry.</span>
-        </div>
+        {renderOfflineBanner()}
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
           <div className="card"><div className="skeleton skeleton-chart" /></div>
           <div className="card"><div className="skeleton skeleton-chart" /></div>
@@ -657,6 +675,7 @@ export function OverviewPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} className="fade-up">
+      {!connected && renderOfflineBanner()}
 
       {/* Row 1: Alerts by OWASP category (wide) + KPI column (In scope / Covered / Uncovered stacked) */}
       <div style={{ display: 'grid', gridTemplateColumns: '2.1fr 1fr', gap: 14, alignItems: 'stretch' }}>

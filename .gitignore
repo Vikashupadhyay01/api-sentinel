@@ -6,6 +6,8 @@
 # runtime data & logs
 data/
 *.jsonl
+logs/
+*.log
 
 # python
 __pycache__/

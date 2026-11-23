@@ -27,6 +27,7 @@ export function AppProvider({ children }) {
   const [timelineBuckets, setTimelineBuckets] = useState([]);
   const [topUsers, setTopUsers] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [offlineHint, setOfflineHint] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [currentMode, setCurrentMode] = useState('passive');
   const [toasts, setToasts] = useState([]);
@@ -69,9 +70,14 @@ export function AppProvider({ children }) {
       setTimelineBuckets(timelineRes.buckets || []);
       setTopUsers(topUsersRes || []);
       setConnected(true);
+      setOfflineHint('');
       setLastUpdated(new Date().toLocaleTimeString());
-    } catch {
+    } catch (err) {
       setConnected(false);
+      const isNonLocal = typeof window !== 'undefined' &&
+        window.location.hostname !== 'localhost' &&
+        window.location.hostname !== '127.0.0.1';
+      setOfflineHint(isNonLocal ? 'blocked by CORS: open http://localhost:5173' : 'backend not running');
     }
   }, [activeTab, addToast]);
 
@@ -83,33 +89,47 @@ export function AppProvider({ children }) {
     const nextMode = currentMode === 'enforce' ? 'passive' : 'enforce';
     try {
       const res = await api.setMode(nextMode);
-      if (res.mode) {
+      if (res && res.mode) {
         setCurrentMode(res.mode);
         addToast(`Switched to ${res.mode === 'enforce' ? 'ENFORCEMENT (403)' : 'PASSIVE AUDIT'} mode`, res.mode === 'enforce' ? 'warning' : 'success');
+      } else if (res && res.error) {
+        addToast(`Failed to toggle mode: ${res.error}`, 'danger');
       }
-    } catch { addToast('Failed to toggle mode', 'danger'); }
+    } catch (err) {
+      addToast(`Failed to toggle mode: ${err.message || 'Connection or CORS failure'}`, 'danger');
+    }
   }, [currentMode, addToast]);
 
   const triggerAttack = useCallback(async (type) => {
     try {
       addToast(`Launching ${type.toUpperCase()} attack…`, 'warning');
       const res = await api.attack(type);
-      if (res.status === 'completed') { addToast(`Simulation done (${res.probes_sent} probes)`, 'success'); fetchData(); }
-      else if (res.error) addToast(`Error: ${res.error}`, 'danger');
-    } catch { addToast('Attack request failed', 'danger'); }
+      if (res && res.status === 'completed') {
+        addToast(`Simulation done (${res.probes_sent} probes)`, 'success');
+        fetchData();
+      } else if (res && res.error) {
+        addToast(`Attack failed: ${res.error}`, 'danger');
+      }
+    } catch (err) {
+      addToast(`Attack request failed: ${err.message || 'Connection or CORS failure'}`, 'danger');
+    }
   }, [addToast, fetchData]);
 
   const triggerReset = useCallback(async () => {
     if (!window.confirm('Reset all detection state, inventory, and event logs?')) return;
     try {
       const res = await api.reset();
-      if (res.status === 'ok') {
+      if (res && res.status === 'ok') {
         knownAlertIdsRef.current.clear();
         setUnreadCount(0);
         addToast('State reset cleanly.', 'success');
         fetchData();
+      } else if (res && res.error) {
+        addToast(`Reset failed: ${res.error}`, 'danger');
       }
-    } catch { addToast('Reset failed', 'danger'); }
+    } catch (err) {
+      addToast(`Reset failed: ${err.message || 'Connection or CORS failure'}`, 'danger');
+    }
   }, [addToast, fetchData]);
 
   return (
@@ -120,7 +140,7 @@ export function AppProvider({ children }) {
       dateRange, setDateRange,
       activeTab, setActiveTab,
       stats, endpoints, alerts, blockedRequests, timelineBuckets, topUsers,
-      connected, lastUpdated, currentMode,
+      connected, offlineHint, apiBase: api.base, lastUpdated, currentMode,
       toasts, addToast, removeToast,
       unreadCount, setUnreadCount,
       alertStatuses, setAlertStatus, getAlertStatus,
