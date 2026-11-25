@@ -6,6 +6,8 @@
 # runtime data & logs
 data/
 *.jsonl
+logs/
+*.log
 
 # python
 __pycache__/
@@ -25,4 +27,8 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+*_nobody
+*_nobody/
+dist_old/
+screenshot_overview_1440.png
 

@@ -136,6 +136,68 @@ class TestCORSHeaders:
         resp = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
         assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173"
 
+    def test_cors_allows_127_0_0_1_origin(self, client):
+        resp = client.get("/api/health", headers={"Origin": "http://127.0.0.1:5173"})
+        assert resp.headers.get("Access-Control-Allow-Origin") == "http://127.0.0.1:5173"
+
+    def test_cors_allows_private_lan_ips(self, client):
+        for lan_origin in [
+            "http://10.0.0.5:5173",
+            "http://192.168.1.100:5173",
+            "http://172.20.10.5:5173",
+            "http://172.16.0.1:5173",
+            "http://172.31.255.254:5173",
+        ]:
+            resp = client.get("/api/health", headers={"Origin": lan_origin})
+            assert resp.headers.get("Access-Control-Allow-Origin") == lan_origin
+
+    def test_cors_rejects_evil_origin(self, client):
+        for evil_origin in [
+            "http://evil.com",
+            "http://evil.com:5173",
+            "http://attacker.local:5173",
+            "http://172.32.0.1:5173",
+            "http://8.8.8.8:5173",
+        ]:
+            resp = client.get("/api/health", headers={"Origin": evil_origin})
+            assert resp.headers.get("Access-Control-Allow-Origin") != evil_origin
+            assert "Access-Control-Allow-Origin" not in resp.headers
+
+    def test_options_preflight_on_mode(self, client):
+        resp = client.open("/api/mode", method="OPTIONS", headers={
+            "Origin": "http://10.0.0.5:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        })
+        assert resp.status_code == 204
+        assert resp.headers.get("Access-Control-Allow-Origin") == "http://10.0.0.5:5173"
+        assert "POST" in resp.headers.get("Access-Control-Allow-Methods", "")
+
+    def test_options_preflight_on_demo_attack(self, client):
+        resp = client.open("/api/demo/attack", method="OPTIONS", headers={
+            "Origin": "http://192.168.1.50:5173",
+            "Access-Control-Request-Method": "POST",
+        })
+        assert resp.status_code == 204
+        assert resp.headers.get("Access-Control-Allow-Origin") == "http://192.168.1.50:5173"
+
+    def test_options_preflight_on_demo_reset(self, client):
+        resp = client.open("/api/demo/reset", method="OPTIONS", headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+        })
+        assert resp.status_code == 204
+        assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:5173"
+
+    def test_options_preflight_rejects_evil(self, client):
+        resp = client.open("/api/mode", method="OPTIONS", headers={
+            "Origin": "http://evil.com",
+            "Access-Control-Request-Method": "POST",
+        })
+        assert resp.status_code == 204
+        assert resp.headers.get("Access-Control-Allow-Origin") != "http://evil.com"
+        assert "Access-Control-Allow-Origin" not in resp.headers
+
 
 # ---------------------------------------------------------------------------
 # Blocked requests endpoint tests (BUG 1)

@@ -5,7 +5,7 @@ Listens on port 9000.  Provides CORS-enabled endpoints consumed by:
   - The React dashboard on port 5173
   - The capture proxy on port 8080 (enforcement mode pre-flight check)
 
-Endpoints
+Endpointss
 ---------
   GET  /api/health      – simple health check {"status": "ok"}
   GET  /api/endpoints   – full endpoint inventory with classification & stats
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -60,22 +61,60 @@ _pipeline = Pipeline(spec_path=SPEC_PATH, state=GLOBAL_STATE)
 
 
 # ---------------------------------------------------------------------------
-# Manual CORS headers (limited to http://localhost:5173)
+# Manual CORS headers (accepts localhost, 127.0.0.1, and private LAN IPs)
 # ---------------------------------------------------------------------------
 
-ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173"}
+CORS_ORIGIN_REGEX = re.compile(
+    r"^https?://(?:"
+    r"localhost|"
+    r"127\.0\.0\.1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")(?::5173)?$"
+)
+
+
+def is_allowed_origin(origin: str | None) -> bool:
+    """Return True if origin matches localhost, 127.0.0.1, or private LAN IPs on port 5173."""
+    if not origin:
+        return False
+    return bool(CORS_ORIGIN_REGEX.match(origin))
+
+
+@app.before_request
+def _handle_preflight():
+    """Handle OPTIONS preflight requests globally for all routes."""
+    if request.method == "OPTIONS":
+        origin = request.headers.get("Origin")
+        resp = Response("", status=204)
+        if origin and is_allowed_origin(origin):
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+            resp.headers["Access-Control-Max-Age"] = "86400"
+        elif not origin:
+            resp.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        return resp
 
 
 @app.after_request
 def _add_cors_headers(response: Response) -> Response:
-    """Allow cross-origin requests from the React dashboard (port 5173)."""
+    """Allow cross-origin requests from localhost and private LAN IPs (port 5173)."""
     origin = request.headers.get("Origin")
-    if origin in ALLOWED_ORIGINS:
-        response.headers["Access-Control-Allow-Origin"] = origin
+    if origin:
+        if is_allowed_origin(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        else:
+            response.headers.pop("Access-Control-Allow-Origin", None)
     else:
         response.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
     return response
 
 

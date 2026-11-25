@@ -91,10 +91,19 @@ api-sentinel/
 ├── capture/                    # Traffic capture layer
 │   ├── proxy.py                # Reverse proxy on :8080 (dynamic mode polling & ENFORCE=1)
 │   └── benchmark.py            # Latency overhead measurement (< 5 ms goal)
-├── dashboard/                  # Frontend UI
-│   ├── src/                    # React 18 + Vite dashboard (drawer, filters, gauge, timeline)
+├── dashboard/                  # Frontend UI (React 18 + Vite)
+│   ├── src/
+│   │   ├── components/         # Sidebar, Header, Toasts, GlobalSearch
+│   │   ├── contexts/           # AppContext (central state, polling, actions)
+│   │   ├── hooks/              # useLocalStorage, usePolling, useAlertStatus, useGlobalSearch
+│   │   ├── lib/                # api.js client, format.js helpers
+│   │   ├── pages/              # Overview, Endpoints, Alerts, Blocked, Users, Reports, Setup
+│   │   ├── App.jsx             # Shell & router layout
+│   │   ├── index.css           # Excel-style Coverage design system (Light/Dark themes)
+│   │   └── main.jsx            # Entry point
+│   ├── .env.example            # VITE_API_BASE=http://localhost:9000/api
 │   ├── package.json            # npm package dependencies
-│   └── preview.html            # Zero-dependency browser preview with interactive controls
+│   └── preview.html            # Standalone zero-dependency browser preview
 ├── data/                       # Runtime event log (events.jsonl)
 ├── docs/                       # Architecture & design documentation
 │   └── ARCHITECTURE.md         # Detailed technical specification
@@ -113,9 +122,50 @@ api-sentinel/
 
 ## 🚀 Quick Start
 
-### 1. Automated Full Demo (Recommended)
+### 1. One-Command Stack Startup (Recommended)
 
-Run the end-to-end simulation script. It launches all services, runs legitimate traffic, executes attacks, verifies detection and enforcement, and outputs a complete summary:
+Start the entire stack (Mock Target API `:8000`, Detection API `:9000`, Capture Proxy `:8080`, and Vite Dashboard `:5173`) in one command. Existing port locks are automatically cleared, services are launched in dependency order, logs are redirected to `logs/*.log`, and everything terminates cleanly on Ctrl+C.
+
+**Linux / Kali / macOS:**
+```bash
+# Passive Audit mode:
+./scripts/start.sh
+
+# Active Enforcement mode (blocks violations with HTTP 403):
+ENFORCE=1 ./scripts/start.sh
+
+# Stop all services anytime:
+./scripts/stop.sh
+```
+
+**Windows PowerShell:**
+```powershell
+# Passive Audit mode:
+.\scripts\start.ps1
+
+# Active Enforcement mode (blocks violations with HTTP 403):
+$env:ENFORCE="1"; .\scripts\start.ps1
+
+# Stop all services anytime:
+.\scripts\stop.ps1
+```
+
+Once running, open your browser at **http://localhost:5173**.
+
+---
+
+### 2. System Diagnostic Check (Doctor)
+
+Run the built-in diagnostic tool anytime to verify Python/Node versions, required packages, port availability, syntax integrity, and API health:
+
+**Linux:** `./scripts/doctor.sh`  
+**Windows:** `.\scripts\doctor.ps1`
+
+---
+
+### 3. Automated Attack Demonstration
+
+Execute the end-to-end simulation script to see real-time detection and enforcement across all OWASP categories:
 
 ```bash
 # Standard Detection Mode (Passively flags all attacks)
@@ -127,7 +177,7 @@ ENFORCE=1 ./scripts/demo.sh
 
 ---
 
-### 2. Manual Component-by-Component Execution
+### 4. Manual Component Execution (Optional)
 
 #### Terminal 1 — Target Mock API
 ```bash
@@ -209,6 +259,21 @@ python3 attack-sim/enumeration_attack.py
 
 ---
 
+## 🎨 v1.2 Redesign Highlights (Security Validation Coverage Dashboard)
+
+The dashboard has been refactored into a modular, responsive architecture styled after an Excel-inspired **Security Validation Coverage Dashboard**:
+- **Design Frame & Palette**: Cyan frame (`#0fb2d9`) framing an inner light card (`#f1f5f6`), accented by Teal (`#1cc8ae`), Cyan (`#0eb3d8`), and Orange (`#f5a623`).
+- **Sidebar Navigation**: Dedicated collapsible navigation (Home, Endpoints, Alerts, Blocked, Users, Reports, Setup) with real-time unread badges.
+- **Pure SVG Responsive Data Visualizations**: Dependency-free, zero-latency visualizations including OWASP category bars, dual-series traffic timelines, coverage & effectiveness donuts, combo blocked/alert charts, user threat stacked bars, and gradient area fills with hover tooltips and click-to-filter.
+- **Workflow State Management**: Alerts can be marked as `New`, `Acknowledged`, `Resolved`, or `False Positive` with localStorage persistence.
+- **User Threat Profiles Page**: Comprehensive user threat scoring, sparklines, and click-through filtering.
+- **Global Search (Ctrl+K / `/`)**: Fast modal search across endpoints, alerts, users, and object IDs.
+- **Light & Dark Themes**: Full CSS variables supporting both the reference light theme and the dark security theme.
+- **Configurable Polling**: Live/pause controls with 1s, 2s, 5s, 10s intervals.
+- **Endpoint Detail Drawer**: Includes an instant "Copy as cURL" button for quick verification.
+
+---
+
 ## 🧪 Testing & Verification
 
 Run the comprehensive unit test suite:
@@ -222,6 +287,43 @@ Measure proxy overhead:
 python3 capture/benchmark.py
 ```
 **Results:** Proxy added latency median is **< 3 ms** (well below the < 5 ms goal).
+
+---
+
+## 🛠️ Troubleshooting
+
+### 1. "Address already in use" (Ports 8000, 9000, 8080, 5173)
+* **Symptom:** Starting a service fails with `OSError: [Errno 98] Address already in use` or Vite error `Port 5173 is in use`.
+* **Fix (Linux/Kali/macOS):**
+  ```bash
+  ./scripts/stop.sh
+  # Or force kill manually:
+  fuser -k 8000/tcp 9000/tcp 8080/tcp 5173/tcp
+  ```
+* **Fix (Windows PowerShell):**
+  ```powershell
+  .\scripts\stop.ps1
+  ```
+
+### 2. "Detection engine offline" or CORS Block in Dashboard
+* **Symptom:** Dashboard displays `⚠️ Detection engine offline` and toasts fail when using a Network IP (e.g. `http://10.0.0.5:5173`).
+* **Cause:** The Detection API binds to `127.0.0.1:9000`. Opening the dashboard through an external network IP may trigger browser CORS restrictions if the host differs.
+* **Fix:** Always navigate to **http://localhost:5173** in your local browser. If you must access over LAN, ensure the frontend connects to `http://<LAN_IP>:9000/api` and that your origin matches private LAN IP ranges (`10.x`, `192.168.x`, `172.16-31.x`).
+* The dashboard's offline banner dynamically reports the exact API target (`VITE_API_BASE`) and gives a diagnostic hint (`"backend not running"` vs `"blocked by CORS: open http://localhost:5173"`).
+
+### 3. "Failed to toggle mode" or Attack/Reset Toast Errors
+* **Symptom:** Header buttons pop red toast notifications.
+* **Fix:** The dashboard toasts now display the exact error cause (e.g. `HTTP 400`, connection refused, or invalid mode) instead of a generic message. Run `./scripts/doctor.sh` to confirm backend API connectivity.
+
+### 4. Syntax & Integrity Pre-Push Check
+* **Requirement:** Never push Python code with syntax issues. Always run `py_compile` before committing or pushing changes:
+  ```bash
+  # Check backend API:
+  python3 -m py_compile backend/api.py
+
+  # Check all modules:
+  python3 -m py_compile backend/*.py capture/*.py mock-api/*.py attack-sim/*.py
+  ```
 
 ---
 
