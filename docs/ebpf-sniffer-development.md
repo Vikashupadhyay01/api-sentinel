@@ -1,21 +1,3 @@
-\# API Sentinel – eBPF Environment Setup
-
-
-
-\## Objective
-
-Prepare the Linux development environment for the eBPF-based network monitoring component using Rust.
-
-
-
-\## Development Environment
-
-\- OS: Kali Linux
-
-\- Virtualization: Oracle VirtualBox
-
-\- Architecture: AMD64
-
 \- Kernel: 7.2.15+kali-amd64
 
 
